@@ -6949,6 +6949,118 @@ export class FoundryDataAccess {
   }
 
   /**
+   * Post an in-character chat message spoken by an actor. If a language is given
+   * and Polyglot is active, tags the message via Polyglot's own flag so it scrambles
+   * for viewers who don't know that language and reads plainly for those who do -
+   * Polyglot only auto-assigns `flags.polyglot.language` from its chat-box language
+   * selector when that flag ISN'T already present on the message (see its
+   * preCreateChatMessage hook), so setting it ourselves at creation time is respected
+   * rather than overwritten. If Polyglot isn't active, falls back to noting the
+   * language as plain text so the intent isn't silently lost.
+   */
+  async createChatMessage(data: {
+    actorIdentifier: string;
+    content: string;
+    language?: string;
+  }): Promise<any> {
+    this.validateFoundryState();
+
+    const actor = this.findActorByIdentifier(data.actorIdentifier);
+    if (!actor) {
+      throw new Error(`Actor not found: ${data.actorIdentifier}`);
+    }
+    if (!data.content || typeof data.content !== 'string') {
+      throw new Error('content is required and must be a string');
+    }
+
+    const polyglotActive = !!(game.modules as any)?.get?.('polyglot')?.active;
+    const applyPolyglot = !!(data.language && polyglotActive);
+
+    const messageData: Record<string, any> = {
+      content: applyPolyglot
+        ? data.content
+        : data.language
+          ? `<p><em>(in ${data.language})</em></p>${data.content}`
+          : data.content,
+      speaker: ChatMessage.getSpeaker({ actor }),
+      style: (CONST as any).CHAT_MESSAGE_STYLES?.IC ?? (CONST as any).CHAT_MESSAGE_TYPES?.IC,
+    };
+
+    if (applyPolyglot) {
+      messageData.flags = { polyglot: { language: data.language } };
+    }
+
+    // chatBubble isn't on by default for a programmatically-created message - core's own
+    // chat box explicitly opts in with this same option when a player types an IC line
+    // (see applications/sidebar/tabs/chat.mjs), so we do the same here.
+    const chatMessage = await ChatMessage.create(messageData, { chatBubble: true } as any);
+
+    // If this actor is an enabled participant in the current scene's ambient banter
+    // roster, log the line to that scene's rolling transcript automatically - keeps
+    // the ambient-banter loop's own tool calls down to just this one per beat.
+    await this.appendAmbientBanterTranscriptIfParticipant(actor.id, actor.name, data.content);
+
+    return {
+      success: true,
+      id: chatMessage?.id,
+      speakerName: messageData.speaker?.alias || actor.name,
+      polyglotApplied: applyPolyglot,
+    };
+  }
+
+  private async appendAmbientBanterTranscriptIfParticipant(
+    actorId: string,
+    actorName: string,
+    content: string
+  ): Promise<void> {
+    const scene = (game.scenes as any).current;
+    if (!scene) return;
+
+    const state = scene.getFlag(MODULE_ID, 'ambientBanter') as
+      | { participants?: Array<{ actorId: string; enabled: boolean }>; transcript?: any[] }
+      | undefined;
+    if (!state?.participants?.some(p => p.actorId === actorId && p.enabled)) return;
+
+    const transcript = [...(state.transcript || []), { speaker: actorName, content }];
+    // Full raw history lives in the vault's own Conversations/ file - this rolling copy
+    // only needs enough recent context for the loop's own next-beat generation.
+    const trimmed = transcript.slice(-40);
+    await scene.setFlag(MODULE_ID, 'ambientBanter', { ...state, transcript: trimmed });
+  }
+
+  /**
+   * Read the current scene's ambient banter state: participants (resolved to actor
+   * names), the raw director's-note log from `/banter`, and the recent rolling
+   * transcript. Used by the ambient-banter loop to decide what happens next.
+   */
+  async getAmbientBanterState(): Promise<any> {
+    this.validateFoundryState();
+    const scene = (game.scenes as any).current;
+    if (!scene) {
+      throw new Error('No active scene');
+    }
+
+    const state = (scene.getFlag(MODULE_ID, 'ambientBanter') as any) || {
+      participants: [],
+      directiveLog: [],
+      transcript: [],
+    };
+
+    const participants = (state.participants || []).map((p: any) => {
+      const actor = game.actors?.get(p.actorId);
+      return { actorId: p.actorId, name: actor?.name || '(deleted actor)', enabled: !!p.enabled };
+    });
+
+    return {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      participants,
+      directiveLog: state.directiveLog || [],
+      transcript: state.transcript || [],
+    };
+  }
+
+  /**
    * Find actor by name or ID
    */
   private findActorByIdentifier(identifier: string): any {

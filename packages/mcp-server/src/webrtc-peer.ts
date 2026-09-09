@@ -51,6 +51,7 @@ export class WebRTCPeer {
   async handleOffer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
     const startTime = Date.now();
     this.logger.info('[WebRTC Timing] Received offer from client');
+    this.logger.info(`[WebRTC Debug] Offer SDP:\n${offer.sdp}`);
 
     // Create peer connection WITHOUT STUN servers for localhost connections
     this.peerConnection = new RTCPeerConnection({
@@ -78,10 +79,50 @@ export class WebRTCPeer {
       `[WebRTC Timing] Answer ready in ${Date.now() - startTime}ms - sending immediately`
     );
 
-    // Data channel and ICE will arrive later via events - don't wait!
-    // The ondatachannel event will fire when the channel is ready
+    // Wait for ICE gathering to finish before handing back the SDP.
+    // There's no trickle-ICE channel back to the browser after this response
+    // (HTTP signaling is one-shot, and the WS signaling socket closes right
+    // after sending the answer), so any candidates gathered after this point
+    // would never reach the client. werift's localDescription getter rebuilds
+    // the SDP from the transport's current candidates, so waiting here means
+    // the returned answer actually includes them.
+    const t4 = Date.now();
+    await this.waitForIceGatheringComplete();
+    this.logger.info(`[WebRTC Timing] ICE gathering wait took ${Date.now() - t4}ms`);
 
-    return this.peerConnection.localDescription as RTCSessionDescriptionInit;
+    // Data channel will arrive later via the ondatachannel event - don't wait for it.
+
+    const finalAnswer = this.peerConnection.localDescription as RTCSessionDescriptionInit;
+    this.logger.info(`[WebRTC Debug] Answer SDP:\n${finalAnswer.sdp}`);
+    return finalAnswer;
+  }
+
+  /**
+   * Resolves once ICE gathering completes, or after timeoutMs elapses -
+   * whichever comes first. A timeout still lets the (possibly incomplete)
+   * answer go out rather than hanging the signaling request forever.
+   */
+  private waitForIceGatheringComplete(timeoutMs = 3000): Promise<void> {
+    if (this.peerConnection?.iceGatheringState === 'complete') {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      const timeout = setTimeout(() => {
+        this.logger.warn(
+          `[WebRTC] ICE gathering did not complete within ${timeoutMs}ms - proceeding with whatever candidates were gathered so far`
+        );
+        resolve();
+      }, timeoutMs);
+
+      const subscription = this.peerConnection?.iceGatheringStateChange.subscribe(state => {
+        if (state === 'complete') {
+          clearTimeout(timeout);
+          subscription?.unSubscribe();
+          resolve();
+        }
+      });
+    });
   }
 
   private setupPeerConnectionHandlers(): void {
