@@ -113,6 +113,11 @@ export class QueryHandlers {
     CONFIG.queries[`${modulePrefix}.upload-generated-map`] =
       this.handleUploadGeneratedMap.bind(this);
 
+    // Chat messaging queries
+    CONFIG.queries[`${modulePrefix}.createChatMessage`] = this.handleCreateChatMessage.bind(this);
+    CONFIG.queries[`${modulePrefix}.getAmbientBanterState`] =
+      this.handleGetAmbientBanterState.bind(this);
+
     // Item usage queries
     CONFIG.queries[`${modulePrefix}.useItem`] = this.handleUseItem.bind(this);
 
@@ -2147,6 +2152,26 @@ export class QueryHandlers {
       throw new Error('updates array is required');
     }
     return this.dataAccess.updateActors(data.updates);
+  }
+
+  private async handleCreateChatMessage(data: {
+    actorIdentifier: string;
+    content: string;
+    language?: string;
+  }): Promise<any> {
+    const gmCheck = this.validateGMAccess();
+    if (!gmCheck.allowed) return { error: 'Access denied', success: false };
+    this.dataAccess.validateFoundryState();
+    if (!data?.actorIdentifier) throw new Error('actorIdentifier is required');
+    if (!data?.content) throw new Error('content is required');
+    return this.dataAccess.createChatMessage(data);
+  }
+
+  private async handleGetAmbientBanterState(): Promise<any> {
+    const gmCheck = this.validateGMAccess();
+    if (!gmCheck.allowed) return { error: 'Access denied', success: false };
+    this.dataAccess.validateFoundryState();
+    return this.dataAccess.getAmbientBanterState();
   }
 
   private async handleDeleteActors(data: { ids: string[] }): Promise<any> {

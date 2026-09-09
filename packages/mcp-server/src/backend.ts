@@ -41,6 +41,8 @@ import { MapGenerationTools } from './tools/map-generation.js';
 
 import { TokenManipulationTools } from './tools/token-manipulation.js';
 
+import { ChatTools } from './tools/chat.js';
+
 import { DSA5CharacterCreator } from './systems/dsa5/character-creator.js';
 
 import { DnD5eAddFeatureTool } from './tools/dnd5e/add-feature.js';
@@ -1218,6 +1220,8 @@ async function startBackend(): Promise<void> {
 
   const tokenManipulationTools = new TokenManipulationTools({ foundryClient, logger });
 
+  const chatTools = new ChatTools({ foundryClient, logger });
+
   const wfrp4eUpdateActorTools = new WFRP4eUpdateActorTools({ foundryClient, logger });
   const wfrp4eAddItemsTools = new WFRP4eAddItemsTools({ foundryClient, logger });
 
@@ -1451,6 +1455,8 @@ async function startBackend(): Promise<void> {
     ...mapGenerationTools.getToolDefinitions(),
 
     ...playlistTools.getToolDefinitions(),
+
+    ...chatTools.getToolDefinitions(),
   ];
 
   // Start Foundry connector (owns app port 31415)
@@ -1782,6 +1788,18 @@ async function startBackend(): Promise<void> {
 
                 case 'update-scene-music':
                   result = await sceneTools.handleUpdateSceneMusic(args);
+
+                  break;
+
+                // Chat tools
+
+                case 'create-chat-message':
+                  result = await chatTools.handleCreateChatMessage(args);
+
+                  break;
+
+                case 'get-ambient-banter-state':
+                  result = await chatTools.handleGetAmbientBanterState();
 
                   break;
 

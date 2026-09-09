@@ -516,6 +516,106 @@ Hooks.once('init', async () => {
   }
 });
 
+// Foundry's own ChatBubbles#getDuration is a private class method (words * 200ms,
+// clamped 1-20s) with no exposed override, so short ambient lines vanish almost
+// immediately. If libWrapper is present, extend on-screen time by delaying just the
+// fade-out animation call - everything else (positioning, fade-in, panning) is left
+// to run exactly as core implements it.
+const EXTRA_BUBBLE_DISPLAY_MS = 8000;
+Hooks.once('init', () => {
+  const lw = (window as any).libWrapper;
+  if (!lw) {
+    console.log(
+      `[${MODULE_ID}] libWrapper not present - chat bubbles keep Foundry's default duration`
+    );
+    return;
+  }
+  lw.register(
+    MODULE_ID,
+    'CONFIG.Canvas.chatBubblesClass.prototype.say',
+    async function (
+      this: any,
+      wrapped: (...args: any[]) => Promise<HTMLElement | null>,
+      ...args: any[]
+    ) {
+      const html = await wrapped(...args);
+      if (!html) return html;
+
+      const originalAnimate = html.animate.bind(html);
+      (html as any).animate = (keyframes: any, opts: any): any => {
+        const isFadeOut =
+          Array.isArray(keyframes?.opacity) &&
+          keyframes.opacity[0] === 1 &&
+          keyframes.opacity[1] === 0;
+        if (!isFadeOut) return originalAnimate(keyframes, opts);
+
+        const finished = new Promise<void>(resolve => {
+          setTimeout(() => {
+            (originalAnimate(keyframes, opts) as Animation).finished.then(() => resolve());
+          }, EXTRA_BUBBLE_DISPLAY_MS);
+        });
+        return { finished };
+      };
+
+      return html;
+    },
+    'WRAPPER'
+  );
+  console.log(
+    `[${MODULE_ID}] Chat bubble display time extended by ${EXTRA_BUBBLE_DISPLAY_MS}ms via libWrapper`
+  );
+});
+
+// Custom `/banter <free text>` chat command - a director's note for the ambient banter
+// feature. Deliberately does no classification of "about the whole scene" vs "about one
+// NPC" here; it just appends the raw text to the current scene's directiveLog, in order.
+// The ambient-banter loop reads that log itself each beat and decides what it means -
+// keeping this handler simple and not needing to be right about intent client-side.
+Hooks.on('chatMessage', (_chatLog: any, message: string, _chatData: any) => {
+  // Note: this fires on every chat message anyone sends, not just /banter - keep this
+  // handler's own logging scoped to actual /banter usage (see handleBanterCommand),
+  // not unconditional here, or every line of normal play spams the console.
+  try {
+    return handleBanterCommand(message);
+  } catch (err) {
+    console.error(`[${MODULE_ID}] /banter handler threw:`, err);
+    return false; // still swallow it - never let this feature crash normal chat
+  }
+});
+
+function handleBanterCommand(rawMessage: string): boolean {
+  // The real chat box is a rich-text (ProseMirror) editor, not a plain <input> - it wraps
+  // typed content in HTML (e.g. "<p>/banter ...</p>") before this hook ever sees it, so the
+  // command has to be detected on the stripped plain text, not the raw HTML string.
+  const message = rawMessage.replace(/<[^>]*>/g, '').trim();
+  if (!message.startsWith('/banter')) return true;
+  console.log(`[${MODULE_ID}] /banter matched, isGM:`, game.user?.isGM);
+  if (!game.user?.isGM) return true; // silent no-op for non-GM, same as everywhere else
+
+  const text = message.slice('/banter'.length).trim();
+  if (!text) {
+    ui.notifications?.warn('Usage: /banter <what should happen next>');
+    return false;
+  }
+
+  const scene = (game.scenes as any).current;
+  if (!scene) {
+    ui.notifications?.warn('No active scene to direct.');
+    return false;
+  }
+
+  const state = scene.getFlag(MODULE_ID, 'ambientBanter') || {
+    participants: [],
+    directiveLog: [],
+    transcript: [],
+  };
+  const directiveLog = [...(state.directiveLog || []), text].slice(-20);
+  scene.setFlag(MODULE_ID, 'ambientBanter', { ...state, directiveLog });
+
+  ui.notifications?.info(`Banter directive set: "${text}"`);
+  return false; // prevent this from also being posted as a normal chat message
+}
+
 Hooks.once('ready', async () => {
   try {
     await foundryMCPBridge.onReady();
