@@ -516,56 +516,6 @@ Hooks.once('init', async () => {
   }
 });
 
-// Foundry's own ChatBubbles#getDuration is a private class method (words * 200ms,
-// clamped 1-20s) with no exposed override, so short ambient lines vanish almost
-// immediately. If libWrapper is present, extend on-screen time by delaying just the
-// fade-out animation call - everything else (positioning, fade-in, panning) is left
-// to run exactly as core implements it.
-const EXTRA_BUBBLE_DISPLAY_MS = 8000;
-Hooks.once('init', () => {
-  const lw = (window as any).libWrapper;
-  if (!lw) {
-    console.log(
-      `[${MODULE_ID}] libWrapper not present - chat bubbles keep Foundry's default duration`
-    );
-    return;
-  }
-  lw.register(
-    MODULE_ID,
-    'CONFIG.Canvas.chatBubblesClass.prototype.say',
-    async function (
-      this: any,
-      wrapped: (...args: any[]) => Promise<HTMLElement | null>,
-      ...args: any[]
-    ) {
-      const html = await wrapped(...args);
-      if (!html) return html;
-
-      const originalAnimate = html.animate.bind(html);
-      (html as any).animate = (keyframes: any, opts: any): any => {
-        const isFadeOut =
-          Array.isArray(keyframes?.opacity) &&
-          keyframes.opacity[0] === 1 &&
-          keyframes.opacity[1] === 0;
-        if (!isFadeOut) return originalAnimate(keyframes, opts);
-
-        const finished = new Promise<void>(resolve => {
-          setTimeout(() => {
-            (originalAnimate(keyframes, opts) as Animation).finished.then(() => resolve());
-          }, EXTRA_BUBBLE_DISPLAY_MS);
-        });
-        return { finished };
-      };
-
-      return html;
-    },
-    'WRAPPER'
-  );
-  console.log(
-    `[${MODULE_ID}] Chat bubble display time extended by ${EXTRA_BUBBLE_DISPLAY_MS}ms via libWrapper`
-  );
-});
-
 // Custom `/banter <free text>` chat command - a director's note for the ambient banter
 // feature. Deliberately does no classification of "about the whole scene" vs "about one
 // NPC" here; it just appends the raw text to the current scene's directiveLog, in order.
