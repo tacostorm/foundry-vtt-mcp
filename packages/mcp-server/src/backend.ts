@@ -1774,6 +1774,11 @@ async function startBackend(): Promise<void> {
 
                   break;
 
+                case 'play-banter-script':
+                  result = await chatTools.handlePlayBanterScript(args);
+
+                  break;
+
                 default:
                   throw new Error(`Unknown tool: ${name}`);
               }

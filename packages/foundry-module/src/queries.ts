@@ -2071,6 +2071,7 @@ export class QueryHandlers {
     actorIdentifier: string;
     content: string;
     language?: string;
+    chatLog?: boolean;
   }): Promise<any> {
     const gmCheck = this.validateGMAccess();
     if (!gmCheck.allowed) return { error: 'Access denied', success: false };
