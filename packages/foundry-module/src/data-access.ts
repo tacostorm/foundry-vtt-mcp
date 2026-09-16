@@ -7042,6 +7042,7 @@ export class FoundryDataAccess {
     actorIdentifier: string;
     content: string;
     language?: string;
+    chatLog?: boolean;
   }): Promise<any> {
     this.validateFoundryState();
 
@@ -7051,6 +7052,34 @@ export class FoundryDataAccess {
     }
     if (!data.content || typeof data.content !== 'string') {
       throw new Error('content is required and must be a string');
+    }
+
+    // Bubble-only is the default delivery for ambient banter - a floating line over the
+    // NPC's token without cluttering the chat pane. Pass chatLog: true to post a real
+    // ChatMessage (with its own auto-bubble) instead, e.g. for a line a player might
+    // want to scroll back and re-read.
+    if (!data.chatLog) {
+      const [token] = (actor.getActiveTokens(false, false) as any[]) || [];
+      if (!token) {
+        throw new Error(
+          `Actor "${actor.name}" has no placed token on the current scene - bubble-only ` +
+            `delivery needs a token to anchor to. Place one, or pass chatLog: true to post ` +
+            `to the chat log instead.`
+        );
+      }
+
+      const bubbleText = data.language ? `(in ${data.language}) ${data.content}` : data.content;
+      await (canvas as any).hud.bubbles.say(token, bubbleText, { emote: false });
+
+      await this.appendAmbientBanterTranscriptIfParticipant(actor.id, actor.name, data.content);
+
+      return {
+        success: true,
+        id: null,
+        speakerName: actor.name,
+        polyglotApplied: false,
+        delivery: 'bubble',
+      };
     }
 
     const polyglotActive = !!(game.modules as any)?.get?.('polyglot')?.active;
@@ -7085,6 +7114,7 @@ export class FoundryDataAccess {
       id: chatMessage?.id,
       speakerName: messageData.speaker?.alias || actor.name,
       polyglotApplied: applyPolyglot,
+      delivery: 'chatLog',
     };
   }
 
