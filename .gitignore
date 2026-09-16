@@ -1,7 +1,8 @@
 # Development Files (Private)
 CLAUDE.md
-DISTRIBUTION.md  
+DISTRIBUTION.md
 RELEASE-PROCESS.md
+_claude_memory_backup/
 
 # Dependencies
 node_modules/
