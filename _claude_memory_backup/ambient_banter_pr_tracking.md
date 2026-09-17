@@ -150,6 +150,19 @@ past tomorrow night's session per the code freeze. Three items:
    behind, including #100 which the quest-creation.ts revert accounted for) - restating
    here since the user explicitly called it out as its own to-do item alongside the three
    above, not just a prerequisite buried in the PR-readiness checklist.
+5. **Build out the `/banter` roster sub-commands** (`start`/`add`/`remove`/`stop`), per the
+   design already worked out in conversation: `/banter start` with no arguments reads
+   `canvas.tokens.controlled` (whatever's currently selected) and replaces the roster
+   outright; `/banter add <name>` / `/banter remove <name>` reuse the existing
+   `findActorByIdentifier` substring resolver for the named path, both also accepting the
+   no-args selected-tokens form; `/banter stop` clears the roster (which also makes the
+   Claude Code loop wind itself down within ~2 beats per `start-banter.md`'s existing
+   fewer-than-2-participants logic). Anything else after `/banter` still falls through to
+   today's freeform-directive-note behavior, unchanged. This is the fix for the still-open
+   gap that nothing shipped in this module can actually populate `participants` -
+   the GM's own private, unshipped macro is the only thing that can right now.
+   Deliberately not built yet, same reasoning as the other items: avoid shipping untested
+   roster-mutation code right before a live session.
 
 ## Related
 
