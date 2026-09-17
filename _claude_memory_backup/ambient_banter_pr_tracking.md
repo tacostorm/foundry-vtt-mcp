@@ -63,24 +63,54 @@ doc in the repo:
 - `module.json` version gets bumped as part of a release-worthy PR.
 - PRs close with an invitation to adjust naming/validation "to house style."
 
+## Cleanup done during full pre-session review (2026-09-17)
+
+The original `33d7220` commit turned out to bundle two entirely unrelated changes
+alongside the real banter work: a `tools/quest-creation.ts` journal-page rename+update fix
+(**already merged upstream as PR #100** — and this branch's copy was actually incomplete,
+missing the matching `data-access.ts` handler fix, so it would have reproduced the exact
+bug #100 fixed) and a `webrtc-peer.ts` ICE-gathering-wait fix + unconditional debug SDP
+logging (diagnostic scope creep, never exercised this session since testing used
+WebSocket-Local-Only, not WebRTC). Both were reverted back to the fork's own pre-banter
+baseline (verified `git diff origin/master` is empty for both files) and rebuilt/redeployed
+locally. Also discovered and committed two features that had been sitting **uncommitted**
+in the working tree this whole session (`play-banter-script`→`create-chat-message`
+consolidation, `bubbleDurationMs`) — always check `git status`/`git diff --stat` before
+calling a work session "done," don't assume every edit got committed along the way.
+
+Ran the real test suite for the first time this session: `npm test` → 153/153 passing
+(unchanged from before this branch existed — **zero new tests for anything added**),
+`npm run typecheck` clean on both packages, `npm run test:mcp:schema` passes.
+
 ## What's left before this is PR-ready
 
-- Run the actual test suite on this branch: `npm test`, `npm run test:mcp:schema`,
-  `npm run typecheck` in both `packages/mcp-server` and `packages/foundry-module` — none
-  of that has been run yet this session, only manual builds + live testing.
 - No automated tests exist yet for `tools/chat.ts` (`create-chat-message`,
-  `get-ambient-banter-state`, `play-banter-script`) — the existing suite likely expects
-  coverage for new tools given the PR-testing convention above.
+  `get-ambient-banter-state`) or `data-access.ts`'s `padBubbleTextForDuration` — worth
+  covering: the `lines`-vs-single-line union parsing, bubble-vs-`chatLog` branching, word-
+  count/clamping math, and documenting the current "first active token wins" behavior for
+  actors with multiple placed tokens (a pre-existing sharp edge in `findActorByIdentifier`/
+  `getActiveTokens`, not introduced by this branch, but more load-bearing now).
 - Still untested: whether a chat bubble on a `hidden: true` token is visible to a
   _non-GM/player_ client (only tested from the GM's own browser so far, where hidden
   tokens are always visible regardless). Worth checking before claiming bubble-only works
   for real player-facing sessions, not just GM-solo testing.
+- `/banter start/add/remove/stop` roster-control sub-commands are still just a design
+  (selected-tokens for the no-args path, `findActorByIdentifier`'s existing substring
+  resolver for the named path) — **deliberately not built yet**, to avoid shipping
+  untested roster-mutation code right before a live session. The GM's own private,
+  unshipped macro is still the only way to set `participants` today. Build this calmly
+  after, not under time pressure.
+- This branch is still based on the fork's stale `origin/master`, ~20 PRs behind real
+  `upstream/master` (added as a remote this session: `adambdooley/foundry-vtt-mcp`). A
+  rebase onto real upstream should happen before actually opening a PR, separately from
+  finishing the banter feature itself.
 - `module.json` version not yet bumped.
 - No PR description drafted yet — use the Gap/Feature-sections/Implementation
   notes/Testing structure above when it's time.
-- Local commit so far: `1f3f005` ("feat: add play-banter-script tool and bubble-only
-  default for chat lines") on top of `33d7220` ("feat: add ambient NPC banter chat tool").
-  Neither has been pushed to origin yet.
+- Commits so far on this branch (none pushed to origin yet): `33d7220` (original banter
+  tool add), `1f3f005` (play-banter-script + bubble-only default, since superseded),
+  `49a6518` (this memory note), `33abea7` (revert libWrapper), and the just-committed
+  consolidation + `bubbleDurationMs` commit.
 
 ## Related
 
