@@ -112,6 +112,45 @@ Ran the real test suite for the first time this session: `npm test` → 153/153 
   `49a6518` (this memory note), `33abea7` (revert libWrapper), and the just-committed
   consolidation + `bubbleDurationMs` commit.
 
+## Future work / backlog (not started, post-launch)
+
+Raised 2026-09-17 while scoping the multilingual-banter idea below; deliberately deferred
+past tomorrow night's session per the code freeze. Three items:
+
+1. **Polyglot-aware chat bubbles.** Bubble-only delivery (the default) never triggers
+   Polyglot scrambling, because there's no real `ChatMessage` document for Polyglot's hooks
+   to intercept - it just shows everyone the same plain text with a "(in necril)"
+   annotation. The user's preferred fix (over always forcing `chatLog: true` for secret
+   lines) is to make bubbles _themselves_ Polyglot-aware - likely hooking/intercepting
+   Foundry's bubble rendering the way the reverted libWrapper patch did for duration, but
+   for scrambling content per-viewer based on the viewing user's own character's known
+   languages instead. Needs real design (Polyglot's own internals/hooks aren't something
+   we've inspected yet) - this is what would make secret/exclusionary multilingual
+   conversation mechanically real even in default bubble-only delivery.
+2. **Character `languages` data model.** No Character file has a `languages:` field yet
+   (vault-side, in `bloodlords-campaign`, not this repo). Needed for: picking the language
+   two banter participants actually share instead of hardcoding Osiriani, letting a subset
+   of participants exclude others who don't share a language, and a comedic
+   doesn't-share-any-language failure beat. User specifically flagged this "may require
+   pulling data from Foundry to populate" - i.e. reading each Actor's actual configured
+   languages from their Foundry sheet (system-specific field, e.g. PF2e
+   `actor.system.traits.languages`) rather than hand-authoring it twice. Check whether
+   `get-character`/`get-character-entity` already expose this before building a new read
+   path.
+3. **Duplicate-actor/"mook" disambiguation.** E.g. six identical "Bandit" tokens around a
+   campfire. Today's actor/token resolution (`findActorByIdentifier`,
+   `getActiveTokens(false, false)[0]`) just picks the first match by name - no way to
+   address "this specific one" of several tokens sharing an actor. Called out by the user
+   for the case of players sneaking up on a group conversation before being noticed -
+   probably needs token-id-based addressing (not just actor name) in `create-chat-message`,
+   plus loop-reasoning changes for a stealth/noticing tension beat. This is also the same
+   underlying gap flagged in the "What's left before PR-ready" section above re: the
+   Crawling Hand swarm on the Bone Shards Hideout scene.
+4. **Rebase this branch onto real `upstream/master`.** Already noted above (~20 PRs
+   behind, including #100 which the quest-creation.ts revert accounted for) - restating
+   here since the user explicitly called it out as its own to-do item alongside the three
+   above, not just a prerequisite buried in the PR-readiness checklist.
+
 ## Related
 
 Runtime/deployment details (SSH, WebRTC bridge, restart procedure for `backend.js` vs.
