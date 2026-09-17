@@ -6958,11 +6958,44 @@ export class FoundryDataAccess {
    * rather than overwritten. If Polyglot isn't active, falls back to noting the
    * language as plain text so the intent isn't silently lost.
    */
+  /**
+   * Foundry's own ChatBubbles#getDuration (private, no exposed override) computes
+   * duration from word count - roughly 200ms/word, clamped to [1000, 20000]ms - and
+   * that calculation runs against the raw message HTML, not its rendered/visible text.
+   * So a hidden `display:none` span appended after the real content nudges the
+   * computed duration up without changing anything the player actually sees (verified
+   * live: an 80-word hidden span behind a one-word "Fine." bubble held it on screen
+   * for ~15s instead of the ~1s floor). This only ever pads UP by adding invisible
+   * words - it never truncates real content to make a line display for less time.
+   */
+  private padBubbleTextForDuration(text: string, targetMs?: number): string {
+    if (!targetMs) return text;
+
+    const MS_PER_WORD = 200;
+    const MIN_DURATION_MS = 1000;
+    const MAX_DURATION_MS = 20000;
+
+    const clampedTarget = Math.max(MIN_DURATION_MS, Math.min(MAX_DURATION_MS, targetMs));
+    const targetWordCount = Math.ceil(clampedTarget / MS_PER_WORD);
+    const currentWordCount = text
+      .replace(/<[^>]*>/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean).length;
+
+    const fillerWordsNeeded = targetWordCount - currentWordCount;
+    if (fillerWordsNeeded <= 0) return text;
+
+    const filler = new Array(fillerWordsNeeded).fill('x').join(' ');
+    return `${text}<span style="display:none" aria-hidden="true">${filler}</span>`;
+  }
+
   async createChatMessage(data: {
     actorIdentifier: string;
     content: string;
     language?: string;
     chatLog?: boolean;
+    bubbleDurationMs?: number;
   }): Promise<any> {
     this.validateFoundryState();
 
@@ -6988,7 +7021,14 @@ export class FoundryDataAccess {
         );
       }
 
-      const bubbleText = data.language ? `(in ${data.language}) ${data.content}` : data.content;
+      // Bubble-only lines default to at least 8s on screen even when word count alone
+      // would compute less (a short punchline otherwise hits Foundry's ~1s floor and
+      // vanishes before it registers) - explicit bubbleDurationMs always overrides this.
+      const DEFAULT_MIN_BUBBLE_DURATION_MS = 8000;
+      const bubbleText = this.padBubbleTextForDuration(
+        data.language ? `(in ${data.language}) ${data.content}` : data.content,
+        data.bubbleDurationMs ?? DEFAULT_MIN_BUBBLE_DURATION_MS
+      );
       await (canvas as any).hud.bubbles.say(token, bubbleText, { emote: false });
 
       await this.appendAmbientBanterTranscriptIfParticipant(actor.id, actor.name, data.content);

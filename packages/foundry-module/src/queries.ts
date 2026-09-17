@@ -2072,6 +2072,7 @@ export class QueryHandlers {
     content: string;
     language?: string;
     chatLog?: boolean;
+    bubbleDurationMs?: number;
   }): Promise<any> {
     const gmCheck = this.validateGMAccess();
     if (!gmCheck.allowed) return { error: 'Access denied', success: false };
