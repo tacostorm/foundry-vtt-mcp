@@ -146,10 +146,22 @@ past tomorrow night's session per the code freeze. Three items:
    plus loop-reasoning changes for a stealth/noticing tension beat. This is also the same
    underlying gap flagged in the "What's left before PR-ready" section above re: the
    Crawling Hand swarm on the Bone Shards Hideout scene.
-4. **Rebase this branch onto real `upstream/master`.** Already noted above (~20 PRs
-   behind, including #100 which the quest-creation.ts revert accounted for) - restating
-   here since the user explicitly called it out as its own to-do item alongside the three
-   above, not just a prerequisite buried in the PR-readiness checklist.
+4. **Rebase this branch onto real `upstream/master`.** DONE 2026-09-19 on the local branch
+   `feature/ambient-banter-rebased` (37 upstream commits absorbed, 0.8.4 base; the old
+   pre-rebase state is kept locally as `backup/ambient-banter-pre-rebase`). Only one real
+   conflict: `packages/mcp-server/src/backend.ts` tool registration/dispatch, where upstream
+   had appended the playlist/music tools (#94) and we appended chat - resolved by keeping
+   both. NOT related to #100. Gotcha worth remembering: replaying our old-base revert of
+   `quest-creation.ts` onto the new base silently deleted upstream's own merged #100 fix (26
+   lines) with no conflict - caught by diffing against `upstream/master` and fixed in a
+   follow-up commit. Always check `git diff upstream/master --stat` after a rebase; the
+   branch should be additive-only. After rebase: build, typecheck, 188/188 tests and the
+   schema smoke test all pass. Still to do: push to the fork (nothing after `33d7220` is on
+   GitHub yet), and split the `_claude_memory_backup/` note commits out of any upstream PR.
+   **Deploy gotcha:** the module installed on the Oracle box has a manifest pointing at
+   upstream's releases (`adambdooley/...`), so updating it through Foundry's UI installs
+   upstream's zip and wipes the banter code. Deploy this fork's built `dist/` by scp instead
+   (back up the remote `dist/` first), and do it together with the next local backend restart.
 5. **Build out the `/banter` roster sub-commands** (`start`/`add`/`remove`/`stop`), per the
    design already worked out in conversation: `/banter start` with no arguments reads
    `canvas.tokens.controlled` (whatever's currently selected) and replaces the roster
