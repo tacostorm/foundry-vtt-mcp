@@ -1799,7 +1799,7 @@ async function startBackend(): Promise<void> {
                   break;
 
                 case 'get-ambient-banter-state':
-                  result = await chatTools.handleGetAmbientBanterState();
+                  result = await chatTools.handleGetAmbientBanterState(args);
 
                   break;
 

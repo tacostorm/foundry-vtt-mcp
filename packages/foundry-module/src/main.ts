@@ -554,13 +554,16 @@ function handleBanterCommand(rawMessage: string): boolean {
     return false;
   }
 
-  const state = scene.getFlag(MODULE_ID, 'ambientBanter') || {
-    participants: [],
-    directiveLog: [],
-    transcript: [],
-  };
-  const directiveLog = [...(state.directiveLog || []), text].slice(-20);
-  scene.setFlag(MODULE_ID, 'ambientBanter', { ...state, directiveLog });
+  const state = scene.getFlag(MODULE_ID, 'ambientBanter') || {};
+  const previousLog: string[] = state.directiveLog || [];
+  const directiveLog = [...previousLog, text].slice(-20);
+  // Write only the fields this command owns. setFlag deep-merges, so the roster the GM's
+  // macro maintains in the same flag is left alone. directiveSeq is a counter that only
+  // ever increases (the log itself is capped, so its length can't signal a new note).
+  scene.setFlag(MODULE_ID, 'ambientBanter', {
+    directiveLog,
+    directiveSeq: (state.directiveSeq ?? previousLog.length) + 1,
+  });
 
   ui.notifications?.info(`Banter directive set: "${text}"`);
   return false; // prevent this from also being posted as a normal chat message

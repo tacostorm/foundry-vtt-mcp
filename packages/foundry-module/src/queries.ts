@@ -2169,11 +2169,17 @@ export class QueryHandlers {
     return this.dataAccess.createChatMessage(data);
   }
 
-  private async handleGetAmbientBanterState(): Promise<any> {
+  private async handleGetAmbientBanterState(data?: {
+    transcriptLimit?: number;
+    positions?: boolean;
+  }): Promise<any> {
     const gmCheck = this.validateGMAccess();
     if (!gmCheck.allowed) return { error: 'Access denied', success: false };
     this.dataAccess.validateFoundryState();
-    return this.dataAccess.getAmbientBanterState();
+    return this.dataAccess.getAmbientBanterState({
+      ...(data?.transcriptLimit !== undefined ? { transcriptLimit: data.transcriptLimit } : {}),
+      ...(data?.positions !== undefined ? { positions: data.positions } : {}),
+    });
   }
 
   private async handleDeleteActors(data: { ids: string[] }): Promise<any> {

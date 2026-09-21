@@ -1,6 +1,10 @@
 import { MODULE_ID, ERROR_MESSAGES, TOKEN_DISPOSITIONS } from './constants.js';
 import { permissionManager } from './permissions.js';
 import { transactionManager } from './transaction-manager.js';
+
+// Scene flag holding the ambient-banter rolling transcript. Kept apart from `ambientBanter`
+// (roster + /banter notes, written by the GM) so a spoken line never rewrites GM input.
+const AMBIENT_BANTER_TRANSCRIPT_FLAG = 'ambientBanterTranscript';
 // Local type definitions to avoid shared package import issues
 interface CharacterInfo {
   id: string;
@@ -7109,8 +7113,20 @@ export class FoundryDataAccess {
         data.language ? `(in ${data.language}) ${data.content}` : data.content,
         data.bubbleDurationMs ?? DEFAULT_MIN_BUBBLE_DURATION_MS
       );
-      await (canvas as any).hud.bubbles.say(token, bubbleText, { emote: false });
-
+      // broadcast() (not say()) so every client viewing the scene shows the bubble; say() is
+      // local to this browser. pan:false keeps the GM's camera from jumping to each speaker,
+      // and requireVisible:true means a player only sees bubbles over tokens they can see.
+      // Not awaited: the returned promise waits on the previous bubble's fade-out for this
+      // token, which never finishes in a throttled or hidden tab and used to make the whole
+      // tool call time out. A failure here is logged, not thrown.
+      Promise.resolve(
+        (canvas as any).hud.bubbles.broadcast(token, bubbleText, {
+          pan: false,
+          requireVisible: true,
+        })
+      ).catch((err: unknown) =>
+        console.warn(`[${MODULE_ID}] Chat bubble failed for ${actor.name}:`, err)
+      );
       await this.appendAmbientBanterTranscriptIfParticipant(actor.id, actor.name, data.content);
 
       return {
@@ -7167,23 +7183,38 @@ export class FoundryDataAccess {
     if (!scene) return;
 
     const state = scene.getFlag(MODULE_ID, 'ambientBanter') as
-      | { participants?: Array<{ actorId: string; enabled: boolean }>; transcript?: any[] }
+      | { participants?: Array<{ actorId: string; enabled: boolean }> }
       | undefined;
     if (!state?.participants?.some(p => p.actorId === actorId && p.enabled)) return;
 
-    const transcript = [...(state.transcript || []), { speaker: actorName, content }];
+    // The transcript lives in its own flag so a line landing never rewrites the roster or
+    // the /banter notes (which share the `ambientBanter` flag and are written by the GM).
+    const existing = this.readAmbientBanterTranscript(scene);
     // Full raw history lives in the vault's own Conversations/ file - this rolling copy
     // only needs enough recent context for the loop's own next-beat generation.
-    const trimmed = transcript.slice(-40);
-    await scene.setFlag(MODULE_ID, 'ambientBanter', { ...state, transcript: trimmed });
+    const trimmed = [...existing, { speaker: actorName, content }].slice(-40);
+    await scene.setFlag(MODULE_ID, AMBIENT_BANTER_TRANSCRIPT_FLAG, trimmed);
+  }
+
+  /** Reads the rolling transcript, falling back to the pre-split location inside `ambientBanter`. */
+  private readAmbientBanterTranscript(scene: any): Array<{ speaker: string; content: string }> {
+    const own = scene.getFlag(MODULE_ID, AMBIENT_BANTER_TRANSCRIPT_FLAG);
+    if (Array.isArray(own)) return own;
+    const legacy = (scene.getFlag(MODULE_ID, 'ambientBanter') as any)?.transcript;
+    return Array.isArray(legacy) ? legacy : [];
   }
 
   /**
    * Read the current scene's ambient banter state: participants (resolved to actor
-   * names), the raw director's-note log from `/banter`, and the recent rolling
-   * transcript. Used by the ambient-banter loop to decide what happens next.
+   * names), the raw director's-note log from `/banter` with its monotonic `directiveSeq`,
+   * and the recent rolling transcript (limited to the last `transcriptLimit` lines when
+   * given; 0 returns none, for cheap polling). Used by the ambient-banter loop to decide
+   * what happens next.
    */
-  async getAmbientBanterState(): Promise<any> {
+  async getAmbientBanterState(
+    options: { transcriptLimit?: number; positions?: boolean } = {}
+  ): Promise<any> {
+    const { transcriptLimit, positions } = options;
     this.validateFoundryState();
     const scene = (game.scenes as any).current;
     if (!scene) {
@@ -7193,7 +7224,6 @@ export class FoundryDataAccess {
     const state = (scene.getFlag(MODULE_ID, 'ambientBanter') as any) || {
       participants: [],
       directiveLog: [],
-      transcript: [],
     };
 
     const participants = (state.participants || []).map((p: any) => {
@@ -7201,12 +7231,79 @@ export class FoundryDataAccess {
       return { actorId: p.actorId, name: actor?.name || '(deleted actor)', enabled: !!p.enabled };
     });
 
+    const directiveLog = state.directiveLog || [];
+    const transcript = this.readAmbientBanterTranscript(scene);
+
     return {
       sceneId: scene.id,
       sceneName: scene.name,
       participants,
-      directiveLog: state.directiveLog || [],
-      transcript: state.transcript || [],
+      directiveLog,
+      // Notes are capped, so the log's length can't serve as a change counter.
+      directiveSeq: state.directiveSeq ?? directiveLog.length,
+      transcript:
+        transcriptLimit === undefined
+          ? transcript
+          : transcriptLimit <= 0
+            ? []
+            : transcript.slice(-transcriptLimit),
+      ...(positions ? this.computeAmbientBanterPositions(scene, participants) : {}),
+    };
+  }
+
+  /**
+   * Where each enabled participant's token is right now and how far apart everyone is, in
+   * grid squares. A snapshot: tokens move (patrols, crowds, people standing up), so callers
+   * re-request it as often as the scene needs. Grid size varies by scene (100px and 200px
+   * both occur), so distances are computed here from the scene's own grid rather than left
+   * to the caller to guess. Euclidean distance between token centers; the caller applies its
+   * own NEAR/MID/FAR thresholds.
+   */
+  private computeAmbientBanterPositions(
+    scene: any,
+    participants: Array<{ actorId: string; name: string; enabled: boolean }>
+  ): any {
+    const gridSize: number = scene.grid?.size || (canvas as any)?.grid?.size || 100;
+    const tokens: any[] = Array.from(scene.tokens ?? []);
+    const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+    const placed: Array<{ name: string; tokenId: string; hidden: boolean; x: number; y: number }> =
+      [];
+    const unplaced: string[] = [];
+    for (const p of participants.filter(part => part.enabled)) {
+      const token = tokens.find(t => t.actorId === p.actorId);
+      if (!token) {
+        unplaced.push(p.name);
+        continue;
+      }
+      placed.push({
+        name: p.name,
+        tokenId: token.id,
+        hidden: !!token.hidden,
+        x: (token.x + ((token.width ?? 1) * gridSize) / 2) / gridSize,
+        y: (token.y + ((token.height ?? 1) * gridSize) / 2) / gridSize,
+      });
+    }
+
+    return {
+      grid: {
+        size: gridSize,
+        distance: scene.grid?.distance ?? 5,
+        units: scene.grid?.units ?? 'ft',
+      },
+      positions: placed.map(seat => ({
+        name: seat.name,
+        tokenId: seat.tokenId,
+        hidden: seat.hidden,
+        x: round1(seat.x),
+        y: round1(seat.y),
+        distances: Object.fromEntries(
+          placed
+            .filter(other => other.name !== seat.name)
+            .map(other => [other.name, round1(Math.hypot(other.x - seat.x, other.y - seat.y))])
+        ),
+      })),
+      ...(unplaced.length ? { noToken: unplaced } : {}),
     };
   }
 
